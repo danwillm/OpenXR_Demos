@@ -409,6 +409,7 @@ struct OpenXrProgram : IOpenXrProgram {
         std::array<XrSpace, Side::COUNT> aimSpace;
 
         XrActionSet actionSet{XR_NULL_HANDLE};
+        XrActionSet actionSetEye{XR_NULL_HANDLE};
         XrAction gripPoseAction{XR_NULL_HANDLE};
         XrAction aimPoseAction{XR_NULL_HANDLE};
         XrAction hapticAction{XR_NULL_HANDLE};
@@ -446,6 +447,13 @@ struct OpenXrProgram : IOpenXrProgram {
             strcpy_s(actionSetInfo.localizedActionSetName, "Gameplay");
             actionSetInfo.priority = 0;
             CHECK_XRCMD(xrCreateActionSet(m_instance, &actionSetInfo, &m_input.actionSet));
+        }
+        {
+            XrActionSetCreateInfo actionSetInfo{XR_TYPE_ACTION_SET_CREATE_INFO};
+            strcpy_s(actionSetInfo.actionSetName, "gameplay_eye");
+            strcpy_s(actionSetInfo.localizedActionSetName, "Gameplay Eye");
+            actionSetInfo.priority = 0;
+            CHECK_XRCMD(xrCreateActionSet(m_instance, &actionSetInfo, &m_input.actionSetEye));
         }
 
         // Get the XrPath for the left and right hands - we will use them as subaction paths.
@@ -731,7 +739,7 @@ struct OpenXrProgram : IOpenXrProgram {
             strcpy_s(actionInfo.actionName, "user_intent");
             actionInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
             strcpy_s(actionInfo.localizedActionName, "User intent");
-            CHECK_XRCMD(xrCreateAction(m_input.actionSet, &actionInfo, &m_input.gazeAction));
+            CHECK_XRCMD(xrCreateAction(m_input.actionSetEye, &actionInfo, &m_input.gazeAction));
 
             XrPath eyeGazeInteractionProfilePath;
             XrPath gazePosePath;
@@ -770,8 +778,9 @@ struct OpenXrProgram : IOpenXrProgram {
         CHECK_XRCMD(xrCreateActionSpace(m_session, &actionSpaceInfo, &m_input.aimSpace[Side::RIGHT]));
 
         XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
-        attachInfo.countActionSets = 1;
-        attachInfo.actionSets = &m_input.actionSet;
+        std::vector<XrActionSet> actionSets = {m_input.actionSet, m_input.actionSetEye};
+        attachInfo.countActionSets = actionSets.size();
+        attachInfo.actionSets = actionSets.data();
         CHECK_XRCMD(xrAttachSessionActionSets(m_session, &attachInfo));
     }
 
@@ -1087,12 +1096,21 @@ struct OpenXrProgram : IOpenXrProgram {
 
     void PollActions() override {
         // Sync actions
-        const XrActiveActionSet activeActionSet{m_input.actionSet, XR_NULL_PATH};
-        XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-        syncInfo.countActiveActionSets = 1;
-        syncInfo.activeActionSets = &activeActionSet;
-        CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
-
+        {
+            const XrActiveActionSet activeActionSet{m_input.actionSet, XR_NULL_PATH};
+            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+            syncInfo.countActiveActionSets = 1;
+            syncInfo.activeActionSets = &activeActionSet;
+            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
+        }
+        {
+            const XrActiveActionSet activeActionSet{m_input.actionSet, XR_NULL_PATH};
+            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+            syncInfo.countActiveActionSets = 1;
+            syncInfo.activeActionSets = &activeActionSet;
+            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
+        }
+        
         static float joystick_x[Side::COUNT] = {0};
         static float joystick_y[Side::COUNT] = {0};
         static float trigger[Side::COUNT] = {0};
