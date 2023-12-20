@@ -1095,9 +1095,11 @@ struct OpenXrProgram : IOpenXrProgram {
     bool IsSessionFocused() const override { return m_sessionState == XR_SESSION_STATE_FOCUSED; }
 
     void PollActions() override {
-        // Sync actions
+
+        //when calling both these xrSyncActions, inputs don't work but poses do
+        //if you change the order (actionSet, then actionSetEye) then poses don't work
         {
-            const XrActiveActionSet activeActionSet{m_input.actionSet, XR_NULL_PATH};
+            const XrActiveActionSet activeActionSet{m_input.actionSetEye, XR_NULL_PATH};
             XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
             syncInfo.countActiveActionSets = 1;
             syncInfo.activeActionSets = &activeActionSet;
@@ -1110,7 +1112,19 @@ struct OpenXrProgram : IOpenXrProgram {
             syncInfo.activeActionSets = &activeActionSet;
             CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
         }
-        
+
+//this works fine for syncing actions
+//        {
+//            XrActiveActionSet  activeActionSet{ m_input.actionSet, XR_NULL_PATH };
+//            XrActiveActionSet  activeActionSetEye{ m_input.actionSetEye, XR_NULL_PATH };
+//            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+//
+//            std::vector<XrActiveActionSet> activeActionSets = { activeActionSet, activeActionSetEye };
+//            syncInfo.countActiveActionSets = activeActionSets.size();
+//            syncInfo.activeActionSets = activeActionSets.data();
+//            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
+//        }
+
         static float joystick_x[Side::COUNT] = {0};
         static float joystick_y[Side::COUNT] = {0};
         static float trigger[Side::COUNT] = {0};
