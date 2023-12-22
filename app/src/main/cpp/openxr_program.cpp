@@ -1096,34 +1096,34 @@ struct OpenXrProgram : IOpenXrProgram {
 
     void PollActions() override {
 
-        //when calling both these xrSyncActions, inputs don't work but poses do
-        //if you change the order (actionSet, then actionSetEye) then poses don't work
-        {
-            const XrActiveActionSet activeActionSet{m_input.actionSetEye, XR_NULL_PATH};
-            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-            syncInfo.countActiveActionSets = 1;
-            syncInfo.activeActionSets = &activeActionSet;
-            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
-        }
-        {
-            const XrActiveActionSet activeActionSet{m_input.actionSet, XR_NULL_PATH};
-            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-            syncInfo.countActiveActionSets = 1;
-            syncInfo.activeActionSets = &activeActionSet;
-            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
-        }
-
-//this works fine for syncing actions
+//        //when calling both these xrSyncActions, inputs don't work but poses do
+//        //if you change the order (actionSet, then actionSetEye) then poses don't work
 //        {
-//            XrActiveActionSet  activeActionSet{ m_input.actionSet, XR_NULL_PATH };
-//            XrActiveActionSet  activeActionSetEye{ m_input.actionSetEye, XR_NULL_PATH };
+//            const XrActiveActionSet activeActionSet{m_input.actionSetEye, XR_NULL_PATH};
 //            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
-//
-//            std::vector<XrActiveActionSet> activeActionSets = { activeActionSet, activeActionSetEye };
-//            syncInfo.countActiveActionSets = activeActionSets.size();
-//            syncInfo.activeActionSets = activeActionSets.data();
+//            syncInfo.countActiveActionSets = 1;
+//            syncInfo.activeActionSets = &activeActionSet;
 //            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
 //        }
+//        {
+//            const XrActiveActionSet activeActionSet{m_input.actionSet, XR_NULL_PATH};
+//            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+//            syncInfo.countActiveActionSets = 1;
+//            syncInfo.activeActionSets = &activeActionSet;
+//            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
+//        }
+
+//this works fine for syncing actions
+        {
+            XrActiveActionSet  activeActionSet{ m_input.actionSet, XR_NULL_PATH };
+            XrActiveActionSet  activeActionSetEye{ m_input.actionSetEye, XR_NULL_PATH };
+            XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
+
+            std::vector<XrActiveActionSet> activeActionSets = { activeActionSet, activeActionSetEye };
+            syncInfo.countActiveActionSets = activeActionSets.size();
+            syncInfo.activeActionSets = activeActionSets.data();
+            CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
+        }
 
         static float joystick_x[Side::COUNT] = {0};
         static float joystick_y[Side::COUNT] = {0};
@@ -1448,10 +1448,12 @@ struct OpenXrProgram : IOpenXrProgram {
             if (m_input.gazeActive) {
                 XrEyeGazeSampleTimeEXT eyeGazeSampleTime{XR_TYPE_EYE_GAZE_SAMPLE_TIME_EXT};
                 XrSpaceLocation gazeLocation{XR_TYPE_SPACE_LOCATION, &eyeGazeSampleTime};
-                res = xrLocateSpace(m_input.gazeActionSpace, m_appSpace, predictedDisplayTime, &gazeLocation);
-                //Log::Write(Log::Level::Info, Fmt("gazeActionSpace pose(%f %f %f)  orientation(%f %f %f %f)", 
-                //                                gazeLocation.pose.position.x, gazeLocation.pose.position.y, gazeLocation.pose.position.z, 
-                //                                gazeLocation.pose.orientation.x, gazeLocation.pose.orientation.y, gazeLocation.pose.orientation.z, gazeLocation.pose.orientation.w));
+
+                //view space instead of local space
+                res = xrLocateSpace(m_input.gazeActionSpace, m_ViewSpace, predictedDisplayTime, &gazeLocation);
+                Log::Write(Log::Level::Info, Fmt("gazeActionSpace pose(%f %f %f)  orientation(%f %f %f %f)",
+                                                gazeLocation.pose.position.x, gazeLocation.pose.position.y, gazeLocation.pose.position.z,
+                                                gazeLocation.pose.orientation.x, gazeLocation.pose.orientation.y, gazeLocation.pose.orientation.z, gazeLocation.pose.orientation.w));
                 m_application->setGazeLocation(gazeLocation, m_views, ipd, res);
             }
         }
