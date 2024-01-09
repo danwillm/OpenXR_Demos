@@ -113,7 +113,10 @@ struct OpenXrProgram : IOpenXrProgram {
             xrDestroyActionSet(m_input.actionSet);
         }
 
-        for (Swapchain swapchain : m_swapchains) {
+        for (Swapchain swapchain : m_swapchains1) {
+            xrDestroySwapchain(swapchain.handle);
+        }
+        for (Swapchain swapchain : m_swapchains2) {
             xrDestroySwapchain(swapchain.handle);
         }
 
@@ -881,7 +884,8 @@ struct OpenXrProgram : IOpenXrProgram {
 
     void CreateSwapchains() override {
         CHECK(m_session != XR_NULL_HANDLE);
-        CHECK(m_swapchains.empty());
+        CHECK(m_swapchains1.empty());
+        CHECK(m_swapchains2.empty());
         CHECK(m_configViews.empty());
 
         // Note: No other view configurations exist at the time this code was written. If this
@@ -946,7 +950,7 @@ struct OpenXrProgram : IOpenXrProgram {
                 swapchain.height = swapchainCreateInfo.height;
                 CHECK_XRCMD(xrCreateSwapchain(m_session, &swapchainCreateInfo, &swapchain.handle));
 
-                m_swapchains.push_back(swapchain);
+                m_swapchains1.push_back(swapchain);
 
                 uint32_t imageCount;
                 CHECK_XRCMD(xrEnumerateSwapchainImages(swapchain.handle, 0, &imageCount, nullptr));
@@ -954,8 +958,44 @@ struct OpenXrProgram : IOpenXrProgram {
                 std::vector<XrSwapchainImageBaseHeader*> swapchainImages = m_graphicsPlugin->AllocateSwapchainImageStructs(imageCount, swapchainCreateInfo);
                 CHECK_XRCMD(xrEnumerateSwapchainImages(swapchain.handle, imageCount, &imageCount, swapchainImages[0]));
 
-                m_swapchainImages.insert(std::make_pair(swapchain.handle, std::move(swapchainImages)));
+                m_swapchainImages1.insert(std::make_pair(swapchain.handle, std::move(swapchainImages)));
             }
+
+            Log::Write(Log::Level::Info, "Created swapchain 1");
+
+            for (uint32_t i = 0; i < viewCount; i++) {
+                const XrViewConfigurationView& vp = m_configViews[i];
+                Log::Write(Log::Level::Info, Fmt("Creating swapchain for view %d with dimensions Width=%d Height=%d SampleCount=%d, maxSampleCount=%d", i,
+                                                 vp.recommendedImageRectWidth, vp.recommendedImageRectHeight, vp.recommendedSwapchainSampleCount, vp.maxSwapchainSampleCount));
+
+                // Create the swapchain.
+                XrSwapchainCreateInfo swapchainCreateInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+                swapchainCreateInfo.arraySize = 1;
+                swapchainCreateInfo.format = m_colorSwapchainFormat;
+                swapchainCreateInfo.width = vp.recommendedImageRectWidth;
+                swapchainCreateInfo.height = vp.recommendedImageRectHeight;
+                swapchainCreateInfo.mipCount = 1;
+                swapchainCreateInfo.faceCount = 1;
+                swapchainCreateInfo.sampleCount = m_graphicsPlugin->GetSupportedSwapchainSampleCount(vp);
+                swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+                Swapchain swapchain;
+                swapchain.width = swapchainCreateInfo.width;
+                swapchain.height = swapchainCreateInfo.height;
+                CHECK_XRCMD(xrCreateSwapchain(m_session, &swapchainCreateInfo, &swapchain.handle));
+
+                m_swapchains2.push_back(swapchain);
+
+                uint32_t imageCount;
+                CHECK_XRCMD(xrEnumerateSwapchainImages(swapchain.handle, 0, &imageCount, nullptr));
+                // XXX This should really just return XrSwapchainImageBaseHeader*
+                std::vector<XrSwapchainImageBaseHeader*> swapchainImages = m_graphicsPlugin->AllocateSwapchainImageStructs(imageCount, swapchainCreateInfo);
+                CHECK_XRCMD(xrEnumerateSwapchainImages(swapchain.handle, imageCount, &imageCount, swapchainImages[0]));
+
+                m_swapchainImages2.insert(std::make_pair(swapchain.handle, std::move(swapchainImages)));
+            }
+
+            Log::Write(Log::Level::Info, "Created swapchain 2");
+
         }
     }
 
@@ -1379,13 +1419,27 @@ struct OpenXrProgram : IOpenXrProgram {
         CHECK_XRCMD(xrBeginFrame(m_session, &frameBeginInfo));
 
         std::vector<XrCompositionLayerBaseHeader*> layers;
-        XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
-        std::vector<XrCompositionLayerProjectionView> projectionLayerViews;
-        if (frameState.shouldRender == XR_TRUE) {
-            if (RenderLayer(frameState.predictedDisplayTime, projectionLayerViews, layer)) {
-                layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer));
+
+        XrCompositionLayerProjection layer1{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+        std::vector<XrCompositionLayerProjectionView> projectionLayerViews1;
+        {
+            if (frameState.shouldRender == XR_TRUE) {
+                if (RenderLayer1(frameState.predictedDisplayTime, projectionLayerViews1, layer1)) {
+                    layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer1));
+                }
             }
         }
+
+        XrCompositionLayerProjection layer2{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+        std::vector<XrCompositionLayerProjectionView> projectionLayerViews2;
+        {
+            if (frameState.shouldRender == XR_TRUE) {
+                if (RenderLayer2(frameState.predictedDisplayTime, projectionLayerViews2, layer2)) {
+                    layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer2));
+                }
+            }
+        }
+
 
         if (m_extentions.activePassthrough) {
             XrCompositionLayerPassthroughFB compositionLayerPassthrough = {XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
@@ -1404,7 +1458,7 @@ struct OpenXrProgram : IOpenXrProgram {
         CHECK_XRCMD(xrEndFrame(m_session, &frameEndInfo));
     }
 
-    bool RenderLayer(XrTime predictedDisplayTime, std::vector<XrCompositionLayerProjectionView>& projectionLayerViews, XrCompositionLayerProjection& layer) {
+    bool RenderLayer1(XrTime predictedDisplayTime, std::vector<XrCompositionLayerProjectionView>& projectionLayerViews, XrCompositionLayerProjection& layer) {
         XrResult res;
         XrViewState viewState{XR_TYPE_VIEW_STATE};
         uint32_t viewCapacityInput = (uint32_t)m_views.size();
@@ -1425,7 +1479,7 @@ struct OpenXrProgram : IOpenXrProgram {
 
         CHECK(viewCountOutput == viewCapacityInput);
         CHECK(viewCountOutput == m_configViews.size());
-        CHECK(viewCountOutput == m_swapchains.size());
+        CHECK(viewCountOutput == m_swapchains1.size());
 
         projectionLayerViews.resize(viewCountOutput);
 
@@ -1528,7 +1582,7 @@ struct OpenXrProgram : IOpenXrProgram {
         // Render view to the appropriate part of the swapchain image.
         for (uint32_t i = 0; i < viewCountOutput; i++) {
             // Each view has a separate swapchain which is acquired, rendered to, and released.
-            const Swapchain viewSwapchain = m_swapchains[i];
+            const Swapchain viewSwapchain = m_swapchains1[i];
             XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
             uint32_t swapchainImageIndex;
             CHECK_XRCMD(xrAcquireSwapchainImage(viewSwapchain.handle, &acquireInfo, &swapchainImageIndex));
@@ -1544,14 +1598,13 @@ struct OpenXrProgram : IOpenXrProgram {
             projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
             projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
 
-            const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
+            const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages1[viewSwapchain.handle][swapchainImageIndex];
 
             m_graphicsPlugin->RenderView(m_application, projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, i);
 
             XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
         }
-
 
         layer.space = m_appSpace;
         if (m_extentions.activePassthrough) {
@@ -1562,6 +1615,162 @@ struct OpenXrProgram : IOpenXrProgram {
         return true;
     }
 
+    bool RenderLayer2(XrTime predictedDisplayTime, std::vector<XrCompositionLayerProjectionView>& projectionLayerViews, XrCompositionLayerProjection& layer) {
+        XrResult res;
+        XrViewState viewState{XR_TYPE_VIEW_STATE};
+        uint32_t viewCapacityInput = (uint32_t)m_views.size();
+        uint32_t viewCountOutput;
+        XrViewLocateInfo viewLocateInfo{XR_TYPE_VIEW_LOCATE_INFO};
+        viewLocateInfo.viewConfigurationType = m_options.Parsed.ViewConfigType;
+        viewLocateInfo.displayTime = predictedDisplayTime;
+        viewLocateInfo.space = m_appSpace;
+
+        res = xrLocateViews(m_session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, m_views.data());
+        CHECK_XRRESULT(res, "xrLocateViews");
+        if ((viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 || (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0) {
+            return false;  // There is no valid tracking poses for the views.
+        }
+
+        // get ipd
+        float ipd = sqrt(pow(abs(m_views[1].pose.position.x - m_views[0].pose.position.x), 2) + pow(abs(m_views[1].pose.position.y - m_views[0].pose.position.y), 2) + pow(abs(m_views[1].pose.position.z - m_views[0].pose.position.z), 2));
+
+        CHECK(viewCountOutput == viewCapacityInput);
+        CHECK(viewCountOutput == m_configViews.size());
+        CHECK(viewCountOutput == m_swapchains1.size());
+
+        projectionLayerViews.resize(viewCountOutput);
+
+        std::vector<XrPosef> handPose;
+        for (auto hand : {Side::LEFT, Side::RIGHT}) {
+            XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
+            res = xrLocateSpace(m_input.aimSpace[hand], m_appSpace, predictedDisplayTime, &spaceLocation);
+            CHECK_XRRESULT(res, "xrLocateSpace");
+            if (XR_UNQUALIFIED_SUCCESS(res)) {
+                if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+                    (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+                    handPose.push_back(spaceLocation.pose);
+                    m_application->setControllerPose(int(hand), spaceLocation.pose);
+                }
+            }
+        }
+
+        //eye tracking
+        if (m_extentions.isSupportEyeTracking && m_extentions.activeEyeTracking) {
+            if (m_input.gazeActive) {
+                XrEyeGazeSampleTimeEXT eyeGazeSampleTime{XR_TYPE_EYE_GAZE_SAMPLE_TIME_EXT};
+                XrSpaceLocation gazeLocation{XR_TYPE_SPACE_LOCATION, &eyeGazeSampleTime};
+
+                //view space instead of local space
+                res = xrLocateSpace(m_input.gazeActionSpace, m_ViewSpace, predictedDisplayTime, &gazeLocation);
+                Log::Write(Log::Level::Info, Fmt("gazeActionSpace pose(%f %f %f)  orientation(%f %f %f %f)",
+                                                 gazeLocation.pose.position.x, gazeLocation.pose.position.y, gazeLocation.pose.position.z,
+                                                 gazeLocation.pose.orientation.x, gazeLocation.pose.orientation.y, gazeLocation.pose.orientation.z, gazeLocation.pose.orientation.w));
+                m_application->setGazeLocation(gazeLocation, m_views, ipd, res);
+            }
+        }
+
+        //hand tracking
+        XrHandJointLocationEXT jointLocations[Side::COUNT][XR_HAND_JOINT_COUNT_EXT];
+        for (auto hand : {Side::LEFT, Side::RIGHT}) {
+            XrHandJointLocationsEXT locations{XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
+            locations.jointCount = XR_HAND_JOINT_COUNT_EXT;
+            locations.jointLocations = jointLocations[hand];
+
+            XrHandJointsLocateInfoEXT locateInfo{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
+            locateInfo.baseSpace = m_appSpace;
+            locateInfo.time = predictedDisplayTime;
+            XrResult res = xrLocateHandJointsEXT(m_handTracker[hand], &locateInfo, &locations);
+            if (res != XR_SUCCESS) {
+                Log::Write(Log::Level::Error, Fmt("m_pfnXrLocateHandJointsEXT res %d", res));
+            }
+        }
+        XrHandJointLocationEXT& leftIndexTip = jointLocations[Side::LEFT][XR_HAND_JOINT_INDEX_TIP_EXT];
+        XrHandJointLocationEXT& rightIndexTip = jointLocations[Side::RIGHT][XR_HAND_JOINT_INDEX_TIP_EXT];
+        //Log::Write(Log::Level::Error, Fmt("leftIndexTip.locationFlags:%d, rightIndexTip.locationFlags %d", leftIndexTip.locationFlags, rightIndexTip.locationFlags));
+        if ((leftIndexTip.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 && (rightIndexTip.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0) {
+            XrVector3f distance;
+            XrVector3f_Sub(&distance, &leftIndexTip.pose.position, &rightIndexTip.pose.position);
+            float len = XrVector3f_Length(&distance);
+            // bring center of index fingers to within 1cm. Probably fine for most humans, unless
+            // they have huge fingers.
+            if (len < 0.01f) {
+                Log::Write(Log::Level::Error, Fmt("len %f", len));
+            }
+        }
+        for (auto hand : {Side::LEFT, Side::RIGHT}) {
+            for (int i = 0; i < XR_HAND_JOINT_COUNT_EXT; i++) {
+                XrHandJointLocationEXT& jointLocation = jointLocations[hand][i];
+                if ((jointLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0) {
+                    //-------------------------------------------------------------
+                    XrHandJointLocationEXT reference_position = jointLocations[hand][1];
+                    XrHandJointLocationEXT reference;
+                    if (i == 2 || i == 7 || i == 12 || i == 17 || i == 21) {
+                        reference = jointLocations[hand][1];
+                    } else {
+                        reference = jointLocations[hand][i - 1];
+                    }
+                    if (i > 1) {
+                        XrQuaternionf orientation;
+                        XrQuaternionf_Multiply(&orientation, &jointLocation.pose.orientation, &reference.pose.orientation);
+                        jointLocation.pose.orientation = orientation;
+
+                        //jointLocation.pose.position.x = jointLocation.pose.position.x - reference_position.pose.position.x;
+                        //jointLocation.pose.position.y = jointLocation.pose.position.y - reference_position.pose.position.y;
+                        //jointLocation.pose.position.z = jointLocation.pose.position.z - reference_position.pose.position.z;
+                    }
+                    //--------------------------------------------------------------
+                }
+            }
+        }
+        m_application->setHandJointLocation((XrHandJointLocationEXT*)jointLocations);
+        //end hand tracking
+
+        XrSpaceVelocity velocity{XR_TYPE_SPACE_VELOCITY};
+        XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION, &velocity};
+        res = xrLocateSpace(m_ViewSpace, m_appSpace, predictedDisplayTime, &spaceLocation);
+        CHECK_XRRESULT(res, "xrLocateSpace");
+
+
+        XrPosef pose[Side::COUNT];
+        for (uint32_t i = 0; i < viewCountOutput; i++) {
+            pose[i] = m_views[i].pose;
+        }
+
+        // Render view to the appropriate part of the swapchain image.
+        for (uint32_t i = 0; i < viewCountOutput; i++) {
+            // Each view has a separate swapchain which is acquired, rendered to, and released.
+            const Swapchain viewSwapchain = m_swapchains1[i];
+            XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+            uint32_t swapchainImageIndex;
+            CHECK_XRCMD(xrAcquireSwapchainImage(viewSwapchain.handle, &acquireInfo, &swapchainImageIndex));
+
+            XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+            waitInfo.timeout = XR_INFINITE_DURATION;
+            CHECK_XRCMD(xrWaitSwapchainImage(viewSwapchain.handle, &waitInfo));
+
+            projectionLayerViews[i] = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+            projectionLayerViews[i].pose = pose[i];
+            projectionLayerViews[i].fov = m_views[i].fov;
+            projectionLayerViews[i].subImage.swapchain = viewSwapchain.handle;
+            projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
+            projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
+
+            const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages1[viewSwapchain.handle][swapchainImageIndex];
+
+            m_graphicsPlugin->RenderView(m_application, projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, i);
+
+            XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+            CHECK_XRCMD(xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo));
+        }
+
+        layer.space = m_appSpace;
+        if (m_extentions.activePassthrough) {
+            layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
+        layer.viewCount = (uint32_t)projectionLayerViews.size();
+        layer.views = projectionLayerViews.data();
+        return true;
+    }
 
    private:
     const Options m_options;
@@ -1573,8 +1782,10 @@ struct OpenXrProgram : IOpenXrProgram {
     XrSystemId m_systemId{XR_NULL_SYSTEM_ID};
 
     std::vector<XrViewConfigurationView> m_configViews;
-    std::vector<Swapchain> m_swapchains;
-    std::map<XrSwapchain, std::vector<XrSwapchainImageBaseHeader*>> m_swapchainImages;
+    std::vector<Swapchain> m_swapchains1;
+    std::vector<Swapchain> m_swapchains2;
+    std::map<XrSwapchain, std::vector<XrSwapchainImageBaseHeader*>> m_swapchainImages1;
+    std::map<XrSwapchain, std::vector<XrSwapchainImageBaseHeader*>> m_swapchainImages2;
     std::vector<XrView> m_views;
     int64_t m_colorSwapchainFormat{-1};
 
