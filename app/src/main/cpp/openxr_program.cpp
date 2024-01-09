@@ -1437,18 +1437,23 @@ struct OpenXrProgram : IOpenXrProgram {
                 if (RenderLayer2(frameState.predictedDisplayTime, projectionLayerViews2, layer2)) {
                     layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer2));
                 }
+
+                projectionLayerViews2[0].fov.angleDown = 2.f / projectionLayerViews2[0].fov.angleDown + 0.1;
+                projectionLayerViews2[0].fov.angleUp /= 2.f;
+                projectionLayerViews2[0].fov.angleLeft /= 2.f;
+                projectionLayerViews2[0].fov.angleRight /= 2.f;
             }
         }
-
-
-        if (m_extentions.activePassthrough) {
-            XrCompositionLayerPassthroughFB compositionLayerPassthrough = {XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
-            compositionLayerPassthrough.layerHandle = m_passthroughLayerReconstruction;
-            //passthrough_layer.layerHandle = m_passthroughLayer_project;
-            compositionLayerPassthrough.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-            compositionLayerPassthrough.space = XR_NULL_HANDLE;
-            layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&compositionLayerPassthrough));
-        }
+//
+//
+//        if (m_extentions.activePassthrough) {
+//            XrCompositionLayerPassthroughFB compositionLayerPassthrough = {XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+//            compositionLayerPassthrough.layerHandle = m_passthroughLayerReconstruction;
+//            //passthrough_layer.layerHandle = m_passthroughLayer_project;
+//            compositionLayerPassthrough.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+//            compositionLayerPassthrough.space = XR_NULL_HANDLE;
+//            layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&compositionLayerPassthrough));
+//        }
 
         XrFrameEndInfo frameEndInfo{XR_TYPE_FRAME_END_INFO};
         frameEndInfo.displayTime = frameState.predictedDisplayTime;
@@ -1631,14 +1636,11 @@ struct OpenXrProgram : IOpenXrProgram {
             return false;  // There is no valid tracking poses for the views.
         }
 
-        // get ipd
-        float ipd = sqrt(pow(abs(m_views[1].pose.position.x - m_views[0].pose.position.x), 2) + pow(abs(m_views[1].pose.position.y - m_views[0].pose.position.y), 2) + pow(abs(m_views[1].pose.position.z - m_views[0].pose.position.z), 2));
-
         CHECK(viewCountOutput == viewCapacityInput);
         CHECK(viewCountOutput == m_configViews.size());
         CHECK(viewCountOutput == m_swapchains1.size());
-
         projectionLayerViews.resize(viewCountOutput);
+
 
         std::vector<XrPosef> handPose;
         for (auto hand : {Side::LEFT, Side::RIGHT}) {
@@ -1653,77 +1655,6 @@ struct OpenXrProgram : IOpenXrProgram {
                 }
             }
         }
-
-        //eye tracking
-        if (m_extentions.isSupportEyeTracking && m_extentions.activeEyeTracking) {
-            if (m_input.gazeActive) {
-                XrEyeGazeSampleTimeEXT eyeGazeSampleTime{XR_TYPE_EYE_GAZE_SAMPLE_TIME_EXT};
-                XrSpaceLocation gazeLocation{XR_TYPE_SPACE_LOCATION, &eyeGazeSampleTime};
-
-                //view space instead of local space
-                res = xrLocateSpace(m_input.gazeActionSpace, m_ViewSpace, predictedDisplayTime, &gazeLocation);
-                Log::Write(Log::Level::Info, Fmt("gazeActionSpace pose(%f %f %f)  orientation(%f %f %f %f)",
-                                                 gazeLocation.pose.position.x, gazeLocation.pose.position.y, gazeLocation.pose.position.z,
-                                                 gazeLocation.pose.orientation.x, gazeLocation.pose.orientation.y, gazeLocation.pose.orientation.z, gazeLocation.pose.orientation.w));
-                m_application->setGazeLocation(gazeLocation, m_views, ipd, res);
-            }
-        }
-
-        //hand tracking
-        XrHandJointLocationEXT jointLocations[Side::COUNT][XR_HAND_JOINT_COUNT_EXT];
-        for (auto hand : {Side::LEFT, Side::RIGHT}) {
-            XrHandJointLocationsEXT locations{XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
-            locations.jointCount = XR_HAND_JOINT_COUNT_EXT;
-            locations.jointLocations = jointLocations[hand];
-
-            XrHandJointsLocateInfoEXT locateInfo{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
-            locateInfo.baseSpace = m_appSpace;
-            locateInfo.time = predictedDisplayTime;
-            XrResult res = xrLocateHandJointsEXT(m_handTracker[hand], &locateInfo, &locations);
-            if (res != XR_SUCCESS) {
-                Log::Write(Log::Level::Error, Fmt("m_pfnXrLocateHandJointsEXT res %d", res));
-            }
-        }
-        XrHandJointLocationEXT& leftIndexTip = jointLocations[Side::LEFT][XR_HAND_JOINT_INDEX_TIP_EXT];
-        XrHandJointLocationEXT& rightIndexTip = jointLocations[Side::RIGHT][XR_HAND_JOINT_INDEX_TIP_EXT];
-        //Log::Write(Log::Level::Error, Fmt("leftIndexTip.locationFlags:%d, rightIndexTip.locationFlags %d", leftIndexTip.locationFlags, rightIndexTip.locationFlags));
-        if ((leftIndexTip.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 && (rightIndexTip.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0) {
-            XrVector3f distance;
-            XrVector3f_Sub(&distance, &leftIndexTip.pose.position, &rightIndexTip.pose.position);
-            float len = XrVector3f_Length(&distance);
-            // bring center of index fingers to within 1cm. Probably fine for most humans, unless
-            // they have huge fingers.
-            if (len < 0.01f) {
-                Log::Write(Log::Level::Error, Fmt("len %f", len));
-            }
-        }
-        for (auto hand : {Side::LEFT, Side::RIGHT}) {
-            for (int i = 0; i < XR_HAND_JOINT_COUNT_EXT; i++) {
-                XrHandJointLocationEXT& jointLocation = jointLocations[hand][i];
-                if ((jointLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0) {
-                    //-------------------------------------------------------------
-                    XrHandJointLocationEXT reference_position = jointLocations[hand][1];
-                    XrHandJointLocationEXT reference;
-                    if (i == 2 || i == 7 || i == 12 || i == 17 || i == 21) {
-                        reference = jointLocations[hand][1];
-                    } else {
-                        reference = jointLocations[hand][i - 1];
-                    }
-                    if (i > 1) {
-                        XrQuaternionf orientation;
-                        XrQuaternionf_Multiply(&orientation, &jointLocation.pose.orientation, &reference.pose.orientation);
-                        jointLocation.pose.orientation = orientation;
-
-                        //jointLocation.pose.position.x = jointLocation.pose.position.x - reference_position.pose.position.x;
-                        //jointLocation.pose.position.y = jointLocation.pose.position.y - reference_position.pose.position.y;
-                        //jointLocation.pose.position.z = jointLocation.pose.position.z - reference_position.pose.position.z;
-                    }
-                    //--------------------------------------------------------------
-                }
-            }
-        }
-        m_application->setHandJointLocation((XrHandJointLocationEXT*)jointLocations);
-        //end hand tracking
 
         XrSpaceVelocity velocity{XR_TYPE_SPACE_VELOCITY};
         XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION, &velocity};
