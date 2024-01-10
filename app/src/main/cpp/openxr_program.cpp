@@ -1438,6 +1438,7 @@ struct OpenXrProgram : IOpenXrProgram {
                     layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer2));
                 }
 
+                //change these as you see fit
                 projectionLayerViews2[0].fov.angleDown = 2.f / projectionLayerViews2[0].fov.angleDown + 0.1;
                 projectionLayerViews2[0].fov.angleUp /= 2.f;
                 projectionLayerViews2[0].fov.angleLeft /= 2.f;
